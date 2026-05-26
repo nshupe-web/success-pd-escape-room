@@ -13,8 +13,33 @@ import {
   Timestamp,
   deleteDoc,
 } from 'firebase/firestore';
+import type { DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
 import type { Team, Mission, Alert } from './types';
+
+function normalizeNumber(value: unknown, fallback: number): number {
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function mapTeamDocument(docData: { id: string; data: () => DocumentData }): Team {
+  const data = docData.data();
+
+  return {
+    id: docData.id,
+    name: typeof data.name === 'string' ? data.name : 'Unnamed Team',
+    code: typeof data.code === 'string' ? data.code : '',
+    captainName: typeof data.captainName === 'string' ? data.captainName : '',
+    members: Array.isArray(data.members) ? data.members : [],
+    color: typeof data.color === 'string' ? data.color : null,
+    currentMission: normalizeNumber(data.currentMission, 1),
+    completedMissions: Array.isArray(data.completedMissions)
+      ? data.completedMissions.map((missionId) => normalizeNumber(missionId, 0)).filter(Boolean)
+      : [],
+    score: normalizeNumber(data.score, 0),
+    createdAt: data.createdAt?.toDate?.() || new Date(),
+  };
+}
 
 // Teams
 export async function getTeamByCode(code: string): Promise<Team | null> {
@@ -24,23 +49,14 @@ export async function getTeamByCode(code: string): Promise<Team | null> {
   
   if (snapshot.empty) return null;
   
-  const docData = snapshot.docs[0];
-  return {
-    id: docData.id,
-    ...docData.data(),
-    createdAt: docData.data().createdAt?.toDate() || new Date(),
-  } as Team;
+  return mapTeamDocument(snapshot.docs[0]);
 }
 
 export async function getAllTeams(): Promise<Team[]> {
   const teamsRef = collection(db, 'teams');
   const snapshot = await getDocs(teamsRef);
   
-  return snapshot.docs.map(docData => ({
-    id: docData.id,
-    ...docData.data(),
-    createdAt: docData.data().createdAt?.toDate() || new Date(),
-  })) as Team[];
+  return snapshot.docs.map(mapTeamDocument);
 }
 
 export async function createTeam(team: Omit<Team, 'id'>): Promise<string> {
@@ -106,9 +122,9 @@ export async function updateTeamProgress(
 ): Promise<void> {
   const teamRef = doc(db, 'teams', teamId);
   await updateDoc(teamRef, {
-    currentMission,
-    completedMissions,
-    score,
+    currentMission: normalizeNumber(currentMission, 1),
+    completedMissions: completedMissions.map((missionId) => normalizeNumber(missionId, 0)).filter(Boolean),
+    score: normalizeNumber(score, 0),
   });
 }
 
@@ -119,22 +135,14 @@ export function subscribeToTeam(teamId: string, callback: (team: Team | null) =>
       callback(null);
       return;
     }
-    callback({
-      id: snapshot.id,
-      ...snapshot.data(),
-      createdAt: snapshot.data().createdAt?.toDate() || new Date(),
-    } as Team);
+    callback(mapTeamDocument(snapshot));
   });
 }
 
 export function subscribeToAllTeams(callback: (teams: Team[]) => void) {
   const teamsRef = collection(db, 'teams');
   return onSnapshot(teamsRef, (snapshot) => {
-    const teams = snapshot.docs.map(docData => ({
-      id: docData.id,
-      ...docData.data(),
-      createdAt: docData.data().createdAt?.toDate() || new Date(),
-    })) as Team[];
+    const teams = snapshot.docs.map(mapTeamDocument);
     callback(teams);
   }, (error) => {
     console.error('[v0] Firebase subscription error:', error);
