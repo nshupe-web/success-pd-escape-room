@@ -13,10 +13,11 @@ import {
   Timestamp,
   deleteDoc,
   increment,
+  limit,
 } from 'firebase/firestore';
 import type { DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
-import type { Team, Mission, Alert, HintRequest } from './types';
+import type { Team, Mission, Alert, HintRequest, ScheduledAlert, AppSettings } from './types';
 
 function normalizeNumber(value: unknown, fallback: number): number {
   const numberValue = typeof value === 'number' ? value : Number(value);
@@ -104,6 +105,29 @@ function mapMissionDocument(docData: { id: string; data: () => DocumentData | un
     locked: Boolean(data.locked),
     unlockAt: normalizeDate(data.unlockAt),
     nextMissionId: data.nextMissionId === null || data.nextMissionId === undefined ? null : normalizeNumber(data.nextMissionId, id + 1),
+  };
+}
+
+function mapScheduledAlertDocument(docData: { id: string; data: () => DocumentData | undefined }): ScheduledAlert {
+  const data = docData.data() || {};
+
+  return {
+    id: docData.id,
+    teamId: typeof data.teamId === 'string' ? data.teamId : null,
+    message: typeof data.message === 'string' ? data.message : '',
+    type: ['info', 'hint', 'warning', 'success'].includes(data.type) ? data.type : 'info',
+    sendAt: normalizeDate(data.sendAt) || new Date(),
+    status: data.status === 'sent' ? 'sent' : 'pending',
+    createdAt: normalizeDate(data.createdAt) || new Date(),
+    sentAt: normalizeDate(data.sentAt),
+  };
+}
+
+function mapAppSettings(data: DocumentData | undefined): AppSettings {
+  return {
+    countdownTarget: normalizeDate(data?.countdownTarget) || new Date('2026-05-29T15:30:00-04:00'),
+    countdownLabel: typeof data?.countdownLabel === 'string' ? data.countdownLabel : 'Time Remaining',
+    notificationsEnabled: Boolean(data?.notificationsEnabled),
   };
 }
 
@@ -428,6 +452,96 @@ export async function markAlertAsRead(alertId: string): Promise<void> {
 export async function deleteAlert(alertId: string): Promise<void> {
   const alertRef = doc(db, 'alerts', alertId);
   await deleteDoc(alertRef);
+}
+
+// Game settings
+export async function getAppSettings(): Promise<AppSettings> {
+  const settingsRef = doc(db, 'settings', 'game');
+  const snapshot = await getDoc(settingsRef);
+  return mapAppSettings(snapshot.data());
+}
+
+export function subscribeToAppSettings(callback: (settings: AppSettings) => void) {
+  const settingsRef = doc(db, 'settings', 'game');
+  return onSnapshot(settingsRef, (snapshot) => {
+    callback(mapAppSettings(snapshot.data()));
+  }, (error) => {
+    console.error('Settings subscription error:', error);
+    callback(mapAppSettings(undefined));
+  });
+}
+
+export async function updateAppSettings(settings: AppSettings): Promise<void> {
+  const settingsRef = doc(db, 'settings', 'game');
+  await setDoc(settingsRef, {
+    countdownTarget: Timestamp.fromDate(settings.countdownTarget),
+    countdownLabel: settings.countdownLabel,
+    notificationsEnabled: Boolean(settings.notificationsEnabled),
+  }, { merge: true });
+}
+
+// Scheduled alerts
+export async function createScheduledAlert(alert: Omit<ScheduledAlert, 'id' | 'status' | 'createdAt' | 'sentAt'>): Promise<string> {
+  const scheduledRef = collection(db, 'scheduledAlerts');
+  const docRef = await addDoc(scheduledRef, {
+    teamId: alert.teamId,
+    message: alert.message,
+    type: alert.type,
+    sendAt: Timestamp.fromDate(alert.sendAt),
+    status: 'pending',
+    createdAt: Timestamp.fromDate(new Date()),
+    sentAt: null,
+  });
+  return docRef.id;
+}
+
+export function subscribeToScheduledAlerts(callback: (alerts: ScheduledAlert[]) => void) {
+  const scheduledRef = collection(db, 'scheduledAlerts');
+  const q = query(scheduledRef, orderBy('sendAt', 'asc'));
+
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(mapScheduledAlertDocument));
+  }, (error) => {
+    console.error('Scheduled alert subscription error:', error);
+    callback([]);
+  });
+}
+
+export async function deleteScheduledAlert(alertId: string): Promise<void> {
+  const scheduledRef = doc(db, 'scheduledAlerts', alertId);
+  await deleteDoc(scheduledRef);
+}
+
+export async function processDueScheduledAlerts(): Promise<number> {
+  const scheduledRef = collection(db, 'scheduledAlerts');
+  const q = query(
+    scheduledRef,
+    where('status', '==', 'pending'),
+    limit(50)
+  );
+  const snapshot = await getDocs(q);
+  const now = Date.now();
+  const dueDocs = snapshot.docs.filter((scheduledDoc) => mapScheduledAlertDocument(scheduledDoc).sendAt.getTime() <= now);
+
+  await Promise.all(dueDocs.map(async (scheduledDoc) => {
+    const scheduled = mapScheduledAlertDocument(scheduledDoc);
+    if (!scheduled.message.trim()) return;
+
+    await sendAlert({
+      teamId: scheduled.teamId,
+      message: scheduled.message,
+      type: scheduled.type,
+      timestamp: new Date(),
+      read: false,
+    });
+
+    await updateDoc(doc(db, 'scheduledAlerts', scheduled.id), {
+      status: 'sent',
+      sentAt: Timestamp.fromDate(new Date()),
+    });
+  }));
+
+  return dueDocs.length;
 }
 
 // Initialize sample data
