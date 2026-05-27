@@ -1,0 +1,503 @@
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  Timestamp,
+  deleteDoc,
+  increment,
+} from 'firebase/firestore';
+import type { DocumentData } from 'firebase/firestore';
+import { db } from './firebase';
+import type { Team, Mission, Alert, HintRequest } from './types';
+
+function normalizeNumber(value: unknown, fallback: number): number {
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function normalizeDate(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'object' && value !== null && 'toDate' in value && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeDateMap(value: unknown): Record<string, Date> {
+  if (!value || typeof value !== 'object') return {};
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, Date>>((acc, [key, item]) => {
+    const date = normalizeDate(item);
+    if (date) acc[key] = date;
+    return acc;
+  }, {});
+}
+
+function normalizeNumberMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object') return {};
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, item]) => {
+    acc[key] = normalizeNumber(item, 0);
+    return acc;
+  }, {});
+}
+
+function serializeDateMap(value: Record<string, Date> | undefined): Record<string, Timestamp> {
+  if (!value) return {};
+
+  return Object.entries(value).reduce<Record<string, Timestamp>>((acc, [key, date]) => {
+    acc[key] = Timestamp.fromDate(date);
+    return acc;
+  }, {});
+}
+
+function mapTeamDocument(docData: { id: string; data: () => DocumentData | undefined }): Team {
+  const data = docData.data() || {};
+
+  return {
+    id: docData.id,
+    name: typeof data.name === 'string' ? data.name : 'Unnamed Team',
+    code: typeof data.code === 'string' ? data.code : '',
+    captainName: typeof data.captainName === 'string' ? data.captainName : undefined,
+    members: Array.isArray(data.members) ? data.members : [],
+    color: typeof data.color === 'string' ? data.color : null,
+    currentMission: normalizeNumber(data.currentMission, 1),
+    completedMissions: Array.isArray(data.completedMissions)
+      ? data.completedMissions.map((missionId) => normalizeNumber(missionId, 0)).filter(Boolean)
+      : [],
+    score: normalizeNumber(data.score, 0),
+    bonusPoints: normalizeNumber(data.bonusPoints, 0),
+    hintsUsed: normalizeNumberMap(data.hintsUsed),
+    missionStartedAt: normalizeDateMap(data.missionStartedAt),
+    missionCompletedAt: normalizeDateMap(data.missionCompletedAt),
+    elapsedSeconds: normalizeNumber(data.elapsedSeconds, 0),
+    createdAt: normalizeDate(data.createdAt) || new Date(),
+  };
+}
+
+function mapMissionDocument(docData: { id: string; data: () => DocumentData | undefined }): Mission {
+  const data = docData.data() || {};
+  const id = normalizeNumber(data.id, parseInt(docData.id, 10));
+
+  return {
+    id,
+    title: typeof data.title === 'string' ? data.title : `Mission ${id}`,
+    description: typeof data.description === 'string' ? data.description : '',
+    storyContext: typeof data.storyContext === 'string' ? data.storyContext : '',
+    geniallyUrl: typeof data.geniallyUrl === 'string' ? data.geniallyUrl : '',
+    correctAnswer: typeof data.correctAnswer === 'string' ? data.correctAnswer : '',
+    answerKey: typeof data.answerKey === 'string' ? data.answerKey : undefined,
+    hints: Array.isArray(data.hints) ? data.hints.filter((hint) => typeof hint === 'string') : data.hint ? [String(data.hint)] : [],
+    hint: typeof data.hint === 'string' ? data.hint : undefined,
+    points: normalizeNumber(data.points, 100),
+    bonusPrompt: typeof data.bonusPrompt === 'string' ? data.bonusPrompt : '',
+    locked: Boolean(data.locked),
+    unlockAt: normalizeDate(data.unlockAt),
+    nextMissionId: data.nextMissionId === null || data.nextMissionId === undefined ? null : normalizeNumber(data.nextMissionId, id + 1),
+  };
+}
+
+// Teams
+export async function getTeamByCode(code: string): Promise<Team | null> {
+  const teamsRef = collection(db, 'teams');
+  const q = query(teamsRef, where('code', '==', code.toUpperCase()));
+  const snapshot = await getDocs(q);
+  
+  if (snapshot.empty) return null;
+  
+  return mapTeamDocument(snapshot.docs[0]);
+}
+
+export async function getAllTeams(): Promise<Team[]> {
+  const teamsRef = collection(db, 'teams');
+  const snapshot = await getDocs(teamsRef);
+  
+  return snapshot.docs.map(mapTeamDocument);
+}
+
+export async function createTeam(team: Omit<Team, 'id'>): Promise<string> {
+  const teamsRef = collection(db, 'teams');
+  const docRef = await addDoc(teamsRef, {
+    ...team,
+    captainName: team.captainName || '',
+    members: team.members || [],
+    color: team.color || null,
+    bonusPoints: team.bonusPoints || 0,
+    hintsUsed: team.hintsUsed || {},
+    missionStartedAt: serializeDateMap(team.missionStartedAt || { 1: team.createdAt }),
+    missionCompletedAt: serializeDateMap(team.missionCompletedAt),
+    elapsedSeconds: team.elapsedSeconds || 0,
+    createdAt: Timestamp.fromDate(team.createdAt),
+  });
+  return docRef.id;
+}
+
+// Generate a unique team code
+export function generateTeamCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+// Check if team code exists
+export async function isTeamCodeUnique(code: string): Promise<boolean> {
+  const existing = await getTeamByCode(code);
+  return existing === null;
+}
+
+// Register a new team with unique code
+export async function registerTeam(
+  name: string,
+  captainName: string,
+  members: string[],
+  color: string | null
+): Promise<{ teamId: string; teamCode: string }> {
+  // Generate unique code
+  let code = generateTeamCode();
+  let attempts = 0;
+  while (!(await isTeamCodeUnique(code)) && attempts < 10) {
+    code = generateTeamCode();
+    attempts++;
+  }
+
+  const teamId = await createTeam({
+    name,
+    code,
+    captainName,
+    members,
+    color,
+    currentMission: 1,
+    completedMissions: [],
+    score: 0,
+    bonusPoints: 0,
+    hintsUsed: {},
+    missionStartedAt: { 1: new Date() },
+    missionCompletedAt: {},
+    elapsedSeconds: 0,
+    createdAt: new Date(),
+  });
+
+  return { teamId, teamCode: code };
+}
+
+export async function updateTeamProgress(
+  teamId: string,
+  currentMission: number,
+  completedMissions: number[],
+  score: number,
+  missionCompletedAt?: Record<string, Date>,
+  elapsedSeconds?: number
+): Promise<void> {
+  const teamRef = doc(db, 'teams', teamId);
+  const payload: Record<string, unknown> = {
+    currentMission: normalizeNumber(currentMission, 1),
+    completedMissions: completedMissions.map((missionId) => normalizeNumber(missionId, 0)).filter(Boolean),
+    score: normalizeNumber(score, 0),
+  };
+
+  if (missionCompletedAt) payload.missionCompletedAt = serializeDateMap(missionCompletedAt);
+  if (typeof elapsedSeconds === 'number') payload.elapsedSeconds = normalizeNumber(elapsedSeconds, 0);
+  if (currentMission) payload[`missionStartedAt.${currentMission}`] = Timestamp.fromDate(new Date());
+
+  await updateDoc(teamRef, payload);
+}
+
+export async function resetTeamGame(teamId: string): Promise<void> {
+  const now = new Date();
+  const teamRef = doc(db, 'teams', teamId);
+  await updateDoc(teamRef, {
+    currentMission: 1,
+    completedMissions: [],
+    score: 0,
+    bonusPoints: 0,
+    hintsUsed: {},
+    missionStartedAt: { 1: Timestamp.fromDate(now) },
+    missionCompletedAt: {},
+    elapsedSeconds: 0,
+  });
+}
+
+export async function awardTeamBonus(team: Team, points: number): Promise<void> {
+  const bonus = normalizeNumber(points, 0);
+  if (!bonus) return;
+
+  const teamRef = doc(db, 'teams', team.id);
+  await updateDoc(teamRef, {
+    score: normalizeNumber(team.score, 0) + bonus,
+    bonusPoints: normalizeNumber(team.bonusPoints, 0) + bonus,
+  });
+}
+
+export function subscribeToTeam(teamId: string, callback: (team: Team | null) => void) {
+  const teamRef = doc(db, 'teams', teamId);
+  return onSnapshot(teamRef, (snapshot) => {
+    if (!snapshot.exists()) {
+      callback(null);
+      return;
+    }
+    callback(mapTeamDocument(snapshot));
+  });
+}
+
+export function subscribeToAllTeams(callback: (teams: Team[]) => void) {
+  const teamsRef = collection(db, 'teams');
+  return onSnapshot(teamsRef, (snapshot) => {
+    const teams = snapshot.docs.map(mapTeamDocument);
+    callback(teams);
+  }, (error) => {
+    console.error('Firebase subscription error:', error);
+    callback([]);
+  });
+}
+
+// Missions
+export async function getMission(missionId: number): Promise<Mission | null> {
+  const missionRef = doc(db, 'missions', missionId.toString());
+  const snapshot = await getDoc(missionRef);
+  
+  if (!snapshot.exists()) return null;
+  
+  return mapMissionDocument(snapshot);
+}
+
+export async function getAllMissions(): Promise<Mission[]> {
+  const missionsRef = collection(db, 'missions');
+  const snapshot = await getDocs(missionsRef);
+  
+  return snapshot.docs.map(mapMissionDocument);
+}
+
+export async function createMission(mission: Mission): Promise<void> {
+  const missionRef = doc(db, 'missions', mission.id.toString());
+  await setDoc(missionRef, {
+    ...mission,
+    unlockAt: mission.unlockAt ? Timestamp.fromDate(mission.unlockAt) : null,
+  });
+}
+
+export async function updateMission(mission: Mission): Promise<void> {
+  const missionRef = doc(db, 'missions', mission.id.toString());
+  await updateDoc(missionRef, {
+    ...mission,
+    unlockAt: mission.unlockAt ? Timestamp.fromDate(mission.unlockAt) : null,
+  });
+}
+
+export async function deleteMission(missionId: number): Promise<void> {
+  const missionRef = doc(db, 'missions', missionId.toString());
+  await deleteDoc(missionRef);
+}
+
+// Alerts
+export async function sendAlert(alert: Omit<Alert, 'id'>): Promise<string> {
+  const alertsRef = collection(db, 'alerts');
+  const docRef = await addDoc(alertsRef, {
+    ...alert,
+    timestamp: Timestamp.fromDate(alert.timestamp),
+  });
+  return docRef.id;
+}
+
+export async function getAlertsForTeam(teamId: string): Promise<Alert[]> {
+  const alertsRef = collection(db, 'alerts');
+  const q = query(
+    alertsRef,
+    where('teamId', 'in', [teamId, null]),
+    orderBy('timestamp', 'desc')
+  );
+  const snapshot = await getDocs(q);
+  
+  return snapshot.docs.map(docData => ({
+    id: docData.id,
+    ...docData.data(),
+    timestamp: docData.data().timestamp?.toDate() || new Date(),
+  })) as Alert[];
+}
+
+export function subscribeToAlerts(teamId: string, callback: (alerts: Alert[]) => void) {
+  const alertsRef = collection(db, 'alerts');
+  // Subscribe to all alerts and filter client-side for real-time updates
+  return onSnapshot(alertsRef, (snapshot) => {
+    const alerts = snapshot.docs
+      .map(docData => ({
+        id: docData.id,
+        ...docData.data(),
+        timestamp: docData.data().timestamp?.toDate() || new Date(),
+      }))
+      .filter(alert => alert.teamId === teamId || alert.teamId === null)
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()) as Alert[];
+    callback(alerts);
+  });
+}
+
+export async function requestMissionHint(team: Team, mission: Mission): Promise<{ success: boolean; error?: string }> {
+  const missionKey = String(mission.id);
+  const used = team.hintsUsed?.[missionKey] || 0;
+  const availableHints = mission.hints?.length || (mission.hint ? 1 : 0);
+
+  if (used >= 3 || used >= availableHints) {
+    return { success: false, error: 'No more hints are available for this mission.' };
+  }
+
+  const hintNumber = used + 1;
+  const teamRef = doc(db, 'teams', team.id);
+  const requestsRef = collection(db, 'hintRequests');
+
+  await updateDoc(teamRef, {
+    [`hintsUsed.${missionKey}`]: hintNumber,
+    score: increment(-5),
+  });
+
+  await addDoc(requestsRef, {
+    teamId: team.id,
+    teamName: team.name,
+    missionId: mission.id,
+    missionTitle: mission.title,
+    hintNumber,
+    status: 'pending',
+    createdAt: Timestamp.fromDate(new Date()),
+    sentAt: null,
+  });
+
+  return { success: true };
+}
+
+function mapHintRequestDocument(docData: { id: string; data: () => DocumentData | undefined }): HintRequest {
+  const data = docData.data() || {};
+
+  return {
+    id: docData.id,
+    teamId: typeof data.teamId === 'string' ? data.teamId : '',
+    teamName: typeof data.teamName === 'string' ? data.teamName : 'Unknown Team',
+    missionId: normalizeNumber(data.missionId, 0),
+    missionTitle: typeof data.missionTitle === 'string' ? data.missionTitle : 'Unknown Mission',
+    hintNumber: normalizeNumber(data.hintNumber, 1),
+    status: data.status === 'sent' ? 'sent' : 'pending',
+    createdAt: normalizeDate(data.createdAt) || new Date(),
+    sentAt: normalizeDate(data.sentAt),
+  };
+}
+
+export function subscribeToHintRequests(callback: (requests: HintRequest[]) => void) {
+  const requestsRef = collection(db, 'hintRequests');
+  return onSnapshot(requestsRef, (snapshot) => {
+    const requests = snapshot.docs
+      .map(mapHintRequestDocument)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    callback(requests);
+  }, (error) => {
+    console.error('Hint request subscription error:', error);
+    callback([]);
+  });
+}
+
+export async function fulfillHintRequest(request: HintRequest, hintText: string): Promise<void> {
+  await sendAlert({
+    teamId: request.teamId,
+    message: `Hint ${request.hintNumber} for ${request.missionTitle}: ${hintText}`,
+    type: 'hint',
+    timestamp: new Date(),
+    read: false,
+  });
+
+  const requestRef = doc(db, 'hintRequests', request.id);
+  await updateDoc(requestRef, {
+    status: 'sent',
+    sentAt: Timestamp.fromDate(new Date()),
+  });
+}
+
+export async function markAlertAsRead(alertId: string): Promise<void> {
+  const alertRef = doc(db, 'alerts', alertId);
+  await updateDoc(alertRef, { read: true });
+}
+
+export async function deleteAlert(alertId: string): Promise<void> {
+  const alertRef = doc(db, 'alerts', alertId);
+  await deleteDoc(alertRef);
+}
+
+// Initialize sample data
+export async function initializeSampleData(): Promise<void> {
+  // Check if missions exist
+  const missions = await getAllMissions();
+  if (missions.length > 0) return;
+
+  // Create sample missions
+  const sampleMissions: Mission[] = [
+    {
+      id: 1,
+      title: 'Enrollment Index Recovery',
+      description: 'Restore the first set of missing student records and verify the corrupted SIS index.',
+      storyContext: 'The redevelopment platform has lost access to graduate files. Use the available evidence and AI-supported clues to rebuild the enrollment index.',
+      geniallyUrl: '',
+      correctAnswer: 'FINDYOURWAY',
+      hints: ['Look for the school mantra.', 'The answer is three words with no spaces.', 'SUCCESS staff say this when students need a path forward.'],
+      points: 100,
+      nextMissionId: 2,
+    },
+    {
+      id: 2,
+      title: 'AI Transcript Audit',
+      description: 'Compare broken transcript fragments and identify the recovery code hidden in the audit trail.',
+      storyContext: 'The AI monitor can help, but its confidence rating is unstable. Teams must decide which clues are trustworthy.',
+      geniallyUrl: '',
+      correctAnswer: 'RESTORE',
+      hints: ['Focus on what the system is trying to do.', 'The code is a single action word.', 'The missing files need to be restored.'],
+      points: 100,
+      nextMissionId: 3,
+    },
+    {
+      id: 3,
+      title: 'Commencement Clearance',
+      description: 'Run the final verification protocol and clear the recovered graduates for commencement.',
+      storyContext: 'The last file fragments are back online. Confirm the final recovery phrase to stabilize the platform.',
+      geniallyUrl: '',
+      correctAnswer: 'SHAMROCK',
+      hints: ['Think about school identity.', 'The word is often connected to green.', 'It is part of the homeoftheshamrocks address.'],
+      points: 125,
+      nextMissionId: null,
+    },
+  ];
+
+  for (const mission of sampleMissions) {
+    await createMission(mission);
+  }
+
+  // Create sample teams
+  const sampleTeams = [
+    { name: 'Team Alpha', code: 'TEAM1', captainName: 'Alpha Leader', members: ['Member 1', 'Member 2'], color: '#00d4ff' },
+    { name: 'Team Beta', code: 'TEAM2', captainName: 'Beta Leader', members: ['Member 1', 'Member 2'], color: '#ffb800' },
+    { name: 'Team Gamma', code: 'TEAM3', captainName: 'Gamma Leader', members: ['Member 1', 'Member 2'], color: '#00ff88' },
+  ];
+
+  for (const team of sampleTeams) {
+    const existing = await getTeamByCode(team.code);
+    if (!existing) {
+      await createTeam({
+        name: team.name,
+        code: team.code,
+        captainName: team.captainName,
+        members: team.members,
+        color: team.color,
+        currentMission: 1,
+        completedMissions: [],
+        score: 0,
+        createdAt: new Date(),
+      });
+    }
+  }
+}
