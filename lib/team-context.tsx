@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, useEffect, ReactNode } from 'react';
 import type { TeamSession, Team, Alert } from '@/lib/types';
 import { getTeamByCode, subscribeToTeam, subscribeToAlerts } from '@/lib/firebase-utils';
 
@@ -10,6 +10,8 @@ interface TeamContextType {
   alerts: Alert[];
   unreadAlerts: number;
   isLoading: boolean;
+  notificationsAllowed: boolean;
+  enableNotifications: () => Promise<{ success: boolean; error?: string }>;
   login: (code: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
@@ -21,6 +23,9 @@ export function TeamProvider({ children }: { children: ReactNode }) {
   const [team, setTeam] = useState<Team | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [notificationsAllowed, setNotificationsAllowed] = useState(false);
+  const knownAlertIds = useRef<Set<string>>(new Set());
+  const alertsInitialized = useRef(false);
 
   // Load session from localStorage on mount
   useEffect(() => {
@@ -33,6 +38,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem('teamSession');
       }
     }
+    setNotificationsAllowed(typeof Notification !== 'undefined' && Notification.permission === 'granted');
     setIsLoading(false);
   }, []);
 
@@ -63,6 +69,29 @@ export function TeamProvider({ children }: { children: ReactNode }) {
 
     return () => unsubscribe();
   }, [session?.teamId]);
+
+  useEffect(() => {
+    if (!alerts.length) return;
+
+    const nextIds = new Set(alerts.map((alert) => alert.id));
+
+    if (!alertsInitialized.current) {
+      knownAlertIds.current = nextIds;
+      alertsInitialized.current = true;
+      return;
+    }
+
+    const newestAlert = alerts.find((alert) => !knownAlertIds.current.has(alert.id));
+    knownAlertIds.current = nextIds;
+
+    if (!newestAlert || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+
+    new Notification('SUCCESS Mission Control', {
+      body: newestAlert.message,
+      tag: newestAlert.id,
+      icon: '/apple-icon.png',
+    });
+  }, [alerts]);
 
   const login = async (code: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
@@ -99,10 +128,24 @@ export function TeamProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('teamSession');
   };
 
+  const enableNotifications = async (): Promise<{ success: boolean; error?: string }> => {
+    if (typeof Notification === 'undefined') {
+      return { success: false, error: 'This browser does not support notifications.' };
+    }
+
+    const permission = await Notification.requestPermission();
+    const allowed = permission === 'granted';
+    setNotificationsAllowed(allowed);
+
+    return allowed
+      ? { success: true }
+      : { success: false, error: 'Notifications were not allowed on this device.' };
+  };
+
   const unreadAlerts = alerts.filter(a => !a.read).length;
 
   return (
-    <TeamContext.Provider value={{ session, team, alerts, unreadAlerts, isLoading, login, logout }}>
+    <TeamContext.Provider value={{ session, team, alerts, unreadAlerts, isLoading, notificationsAllowed, enableNotifications, login, logout }}>
       {children}
     </TeamContext.Provider>
   );
