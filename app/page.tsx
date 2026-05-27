@@ -81,7 +81,7 @@ export default function LoginPage() {
                 </div>
                 <div>
                   <h2 className="text-xl font-semibold text-[#26333d]">Mission Control Login</h2>
-                  <p className="text-sm text-[#54616b]">PowerSchool-style access portal</p>
+                  <p className="text-sm text-[#54616b]">Graduation Recovery access portal</p>
                 </div>
               </div>
             </div>
