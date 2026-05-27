@@ -11,17 +11,22 @@ import {
   createMission,
   createTeam,
   deleteMission,
+  deleteScheduledAlert,
   awardTeamBonus,
   fulfillHintRequest,
   getAllMissions,
   initializeSampleData,
   sendAlert,
+  createScheduledAlert,
   subscribeToAllTeams,
+  subscribeToAppSettings,
   subscribeToHintRequests,
+  subscribeToScheduledAlerts,
   updateMission,
+  updateAppSettings,
   resetTeamGame,
 } from '@/lib/firebase-utils';
-import type { Alert, HintRequest, Mission, Team } from '@/lib/types';
+import type { Alert, AppSettings, HintRequest, Mission, ScheduledAlert, Team } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +54,12 @@ export default function AdminPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [hintRequests, setHintRequests] = useState<HintRequest[]>([]);
+  const [scheduledAlerts, setScheduledAlerts] = useState<ScheduledAlert[]>([]);
+  const [appSettings, setAppSettings] = useState<AppSettings>({
+    countdownTarget: new Date('2026-05-29T15:30:00-04:00'),
+    countdownLabel: 'Time Remaining',
+    notificationsEnabled: false,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isInitializing, setIsInitializing] = useState(false);
   const [missionForm, setMissionForm] = useState(emptyMission);
@@ -56,6 +67,12 @@ export default function AdminPage() {
   const [alertMessage, setAlertMessage] = useState('');
   const [alertType, setAlertType] = useState<Alert['type']>('info');
   const [alertTarget, setAlertTarget] = useState('all');
+  const [scheduledMessage, setScheduledMessage] = useState('');
+  const [scheduledType, setScheduledType] = useState<Alert['type']>('info');
+  const [scheduledTarget, setScheduledTarget] = useState('all');
+  const [scheduledSendAt, setScheduledSendAt] = useState('');
+  const [countdownTarget, setCountdownTarget] = useState('');
+  const [countdownLabel, setCountdownLabel] = useState('Time Remaining');
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamCode, setNewTeamCode] = useState('');
   const [bonusAwards, setBonusAwards] = useState<Record<string, string>>({});
@@ -68,10 +85,18 @@ export default function AdminPage() {
       setIsLoading(false);
     });
     const unsubscribeHints = subscribeToHintRequests(setHintRequests);
+    const unsubscribeScheduledAlerts = subscribeToScheduledAlerts(setScheduledAlerts);
+    const unsubscribeSettings = subscribeToAppSettings((settings) => {
+      setAppSettings(settings);
+      setCountdownLabel(settings.countdownLabel);
+      setCountdownTarget(toDatetimeLocal(settings.countdownTarget));
+    });
     loadMissions();
     return () => {
       unsubscribeTeams();
       unsubscribeHints();
+      unsubscribeScheduledAlerts();
+      unsubscribeSettings();
     };
   }, []);
 
@@ -168,6 +193,28 @@ export default function AdminPage() {
     }
   };
 
+  const scheduleNewsAlert = async () => {
+    if (!scheduledMessage.trim() || !scheduledSendAt) {
+      toast.error('Enter a scheduled message and send time.');
+      return;
+    }
+
+    try {
+      await createScheduledAlert({
+        teamId: scheduledTarget === 'all' ? null : scheduledTarget,
+        message: scheduledMessage.trim(),
+        type: scheduledType,
+        sendAt: new Date(scheduledSendAt),
+      });
+      setScheduledMessage('');
+      setScheduledSendAt('');
+      toast.success('Alert scheduled.');
+    } catch (error) {
+      console.error('Schedule alert error:', error);
+      toast.error('Scheduled alert could not be saved.');
+    }
+  };
+
   const sendHint = async (request: HintRequest) => {
     const mission = missions.find((item) => item.id === request.missionId);
     const hintText = mission?.hints?.[request.hintNumber - 1] || mission?.hint || '';
@@ -259,6 +306,25 @@ export default function AdminPage() {
     }
   };
 
+  const saveCountdownSettings = async () => {
+    if (!countdownTarget) {
+      toast.error('Choose a countdown target date and time.');
+      return;
+    }
+
+    try {
+      await updateAppSettings({
+        ...appSettings,
+        countdownTarget: new Date(countdownTarget),
+        countdownLabel: countdownLabel.trim() || 'Time Remaining',
+      });
+      toast.success('Countdown updated.');
+    } catch (error) {
+      console.error('Countdown update error:', error);
+      toast.error('Countdown could not be updated.');
+    }
+  };
+
   const logoutAdmin = async () => {
     await fetch('/api/admin-logout', { method: 'POST' });
     router.push('/admin-login');
@@ -303,11 +369,13 @@ export default function AdminPage() {
 
       <div className="mx-auto max-w-7xl px-4 py-5">
         <Tabs defaultValue="missions" className="space-y-5">
-          <TabsList className="grid h-auto w-full grid-cols-2 bg-white md:grid-cols-4">
+          <TabsList className="grid h-auto w-full grid-cols-2 bg-white md:grid-cols-6">
             <TabsTrigger value="missions">Missions</TabsTrigger>
             <TabsTrigger value="hints">Hint Queue</TabsTrigger>
             <TabsTrigger value="teams">Teams</TabsTrigger>
             <TabsTrigger value="alerts">Alerts</TabsTrigger>
+            <TabsTrigger value="schedule">Schedule</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="missions" className="grid gap-5 lg:grid-cols-[420px_1fr]">
@@ -437,10 +505,93 @@ export default function AdminPage() {
               </div>
             </Panel>
           </TabsContent>
+
+          <TabsContent value="schedule" className="grid gap-5 lg:grid-cols-[420px_1fr]">
+            <Panel title="Schedule Alert">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Message</Label>
+                  <Textarea value={scheduledMessage} onChange={(event) => setScheduledMessage(event.target.value)} placeholder="This clue will appear automatically at the scheduled time." />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={scheduledType} onChange={(event) => setScheduledType(event.target.value as Alert['type'])}>
+                      <option value="info">Info</option>
+                      <option value="warning">Warning</option>
+                      <option value="hint">Hint</option>
+                      <option value="success">Success</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Target</Label>
+                    <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={scheduledTarget} onChange={(event) => setScheduledTarget(event.target.value)}>
+                      <option value="all">All Teams</option>
+                      {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Send At</Label>
+                  <Input type="datetime-local" value={scheduledSendAt} onChange={(event) => setScheduledSendAt(event.target.value)} />
+                </div>
+                <Button className="w-full bg-[#3b4f5f] hover:bg-[#304250]" onClick={scheduleNewsAlert}>
+                  Schedule Alert
+                </Button>
+              </div>
+            </Panel>
+
+            <Panel title="Scheduled Alerts">
+              <div className="space-y-3">
+                {scheduledAlerts.length === 0 && <p className="text-sm text-[#54616b]">No scheduled alerts yet.</p>}
+                {scheduledAlerts.map((alert) => (
+                  <div key={alert.id} className="rounded border border-[#d6e0e6] bg-[#f8fafb] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <Badge className={alert.status === 'sent' ? 'bg-[#5ba300] text-white hover:bg-[#5ba300]' : 'bg-[#ff7a2a] text-white hover:bg-[#ff7a2a]'}>
+                          {alert.status}
+                        </Badge>
+                        <p className="mt-2 text-sm font-semibold text-[#26333d]">{alert.message}</p>
+                        <p className="mt-1 text-xs text-[#54616b]">{alert.sendAt.toLocaleString()} | {alert.teamId ? 'Team only' : 'All teams'}</p>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={async () => {
+                        await deleteScheduledAlert(alert.id);
+                        toast.success('Scheduled alert deleted.');
+                      }} aria-label="Delete scheduled alert">
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <Panel title="Countdown Control">
+              <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                <div className="space-y-2">
+                  <Label>Countdown Label</Label>
+                  <Input value={countdownLabel} onChange={(event) => setCountdownLabel(event.target.value)} placeholder="Time Remaining" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Countdown Ends At</Label>
+                  <Input type="datetime-local" value={countdownTarget} onChange={(event) => setCountdownTarget(event.target.value)} />
+                </div>
+                <Button className="bg-[#3b4f5f] hover:bg-[#304250]" onClick={saveCountdownSettings}>
+                  Save Countdown
+                </Button>
+              </div>
+            </Panel>
+          </TabsContent>
         </Tabs>
       </div>
     </main>
   );
+}
+
+function toDatetimeLocal(date: Date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
