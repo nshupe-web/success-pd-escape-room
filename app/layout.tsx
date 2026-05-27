@@ -3,6 +3,7 @@ import { Orbitron, Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { TeamProvider } from '@/lib/team-context'
 import { Toaster } from '@/components/ui/sonner'
+import { PwaRegistration } from '@/components/pwa-registration'
 import './globals.css'
 
 const orbitron = Orbitron({ 
@@ -18,7 +19,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'SUCCESS Mission Control',
+  title: 'SUCCESS Graduation Recovery Initiative',
   description: 'Staff team mission platform for SUCCESS Virtual Learning professional development',
   generator: 'Codex',
   manifest: '/manifest.json',
@@ -58,6 +59,7 @@ export default function RootLayout({
     <html lang="en" className={`${orbitron.variable} ${inter.variable} bg-background`}>
       <body className="font-sans antialiased min-h-screen">
         <TeamProvider>
+          <PwaRegistration />
           {children}
           <Toaster position="top-center" richColors />
         </TeamProvider>
