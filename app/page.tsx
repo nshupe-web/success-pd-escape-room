@@ -48,27 +48,27 @@ export default function LoginPage() {
               <Image src="/success-logo.png" alt="SUCCESS Virtual Learning Centers of Michigan" width={260} height={82} priority />
             </div>
             <div className="hidden rounded border border-white/20 bg-white/10 px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-yellow-100 sm:block">
-              SIS ERROR 451
+              GRI CASE FILES
             </div>
           </div>
 
           <div className="max-w-2xl py-10">
             <div className="mb-5 inline-flex items-center gap-2 rounded border border-orange-300/50 bg-orange-400/15 px-3 py-2 text-sm font-semibold text-orange-100">
               <AlertTriangle className="h-4 w-4" />
-              Student records recovery protocol
+              Graduation Recovery Initiative
             </div>
             <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
-              Find Your Way through the corrupted school system.
+              Find Your Way through real student-success missions.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-slate-100">
-              Team up, restore missing graduate files, use AI clues wisely, and rebuild the SUCCESS redevelopment platform before the system locks again.
+              Team up as Student Success Teams, investigate graduation barriers, use AI clues wisely, and build realistic support plans before the countdown ends.
             </p>
           </div>
 
           <div className="grid gap-3 text-sm sm:grid-cols-3">
-            <StatusTile label="Database" value="Fragmented" tone="orange" />
-            <StatusTile label="AI Monitor" value="Unstable" tone="yellow" />
-            <StatusTile label="Graduates" value="Recoverable" tone="green" />
+            <StatusTile label="Case Files" value="Active" tone="orange" />
+            <StatusTile label="AI Support" value="Available" tone="yellow" />
+            <StatusTile label="Students" value="Counting on Us" tone="green" />
           </div>
         </section>
 
