@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Bell, CheckCircle2, Database, Loader2, Lock, Plus, RadioTower, RefreshCw, Send, Trash2, Trophy } from 'lucide-react';
@@ -44,6 +45,7 @@ const emptyMission = {
 };
 
 export default function AdminPage() {
+  const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [hintRequests, setHintRequests] = useState<HintRequest[]>([]);
@@ -257,6 +259,12 @@ export default function AdminPage() {
     }
   };
 
+  const logoutAdmin = async () => {
+    await fetch('/api/admin-logout', { method: 'POST' });
+    router.push('/admin-login');
+    router.refresh();
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#edf2f5]">
@@ -276,17 +284,20 @@ export default function AdminPage() {
             </Link>
             <Image src="/success-logo.png" alt="SUCCESS Virtual Learning Centers of Michigan" width={214} height={68} />
           </div>
-          <Button variant="outline" className="border-[#b7c3cb]" disabled={isInitializing} onClick={initializeData}>
-            {isInitializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
-            Initialize Sample Data
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="border-[#b7c3cb]" disabled={isInitializing} onClick={initializeData}>
+              {isInitializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+              Initialize Sample Data
+            </Button>
+            <Button variant="ghost" onClick={logoutAdmin}>Admin Logout</Button>
+          </div>
         </div>
       </header>
 
       <section className="ps-shell broken-panel px-4 py-6 text-white">
         <div className="mx-auto max-w-7xl">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-yellow-100">Game Master Console</p>
-          <h1 className="mt-2 text-3xl font-bold md:text-5xl">Redevelopment Operations</h1>
+          <h1 className="mt-2 text-3xl font-bold md:text-5xl">Graduation Recovery Operations</h1>
         </div>
       </section>
 
@@ -401,7 +412,7 @@ export default function AdminPage() {
               <div className="grid gap-4 md:grid-cols-[1fr_180px_180px_auto] md:items-end">
                 <div className="space-y-2">
                   <Label>Message</Label>
-                  <Textarea value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Drop a clue, announce a lock window, or send a system warning." />
+                  <Textarea value={alertMessage} onChange={(event) => setAlertMessage(event.target.value)} placeholder="Drop a clue, announce a lock window, or send a student-success update." />
                 </div>
                 <div className="space-y-2">
                   <Label>Type</Label>
@@ -466,7 +477,7 @@ function MissionForm({
         </div>
         <div className="space-y-2">
           <Label>Title</Label>
-          <Input value={form.title} onChange={(event) => update('title', event.target.value)} placeholder="Transcript Recovery" />
+          <Input value={form.title} onChange={(event) => update('title', event.target.value)} placeholder="The Enrollment Barrier" />
         </div>
       </div>
       <div className="space-y-2">
