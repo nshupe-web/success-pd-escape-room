@@ -122,7 +122,7 @@ export default function DashboardPage() {
             <Image src="/success-logo.png" alt="SUCCESS Virtual Learning Centers of Michigan" width={214} height={68} priority />
             <div className="hidden border-l border-[#d6e0e6] pl-3 md:block">
               <p className="text-sm font-bold text-[#3b4f5f]">Mission Control</p>
-              <p className="text-xs text-[#54616b]">Corrupted SIS Recovery</p>
+              <p className="text-xs text-[#54616b]">Graduation Recovery Initiative</p>
             </div>
           </Link>
           <div className="flex items-center gap-3">
@@ -147,16 +147,16 @@ export default function DashboardPage() {
           <div>
             <div className="mb-4 inline-flex items-center gap-2 rounded border border-orange-300/50 bg-orange-400/15 px-3 py-2 text-sm font-semibold text-orange-100">
               <FileWarning className="h-4 w-4" />
-              Graduate file corruption detected
+              Student success case files active
             </div>
-            <h1 className="text-3xl font-bold md:text-5xl">Redevelopment Console</h1>
+            <h1 className="text-3xl font-bold md:text-5xl">Graduation Recovery Console</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-100">
-              Recover missing student records, complete AI-supported missions, and help rebuild the SUCCESS software before the next lock window.
+              Work through authentic enrollment, attendance, communication, intervention, and graduation-tracking missions before the next lock window.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <StatusBox icon={Clock} label="Time Remaining" value={timeRemaining} />
-            <StatusBox icon={Gauge} label="Software Restored" value={`${redevelopmentPercent}%`} />
+            <StatusBox icon={Gauge} label="Recovery Progress" value={`${redevelopmentPercent}%`} />
           </div>
         </div>
       </section>
@@ -248,7 +248,7 @@ export default function DashboardPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-[#54616b]">Game Master clues and approved hints will appear here.</p>
+              <p className="text-sm text-[#54616b]">Game Master clues, case updates, and approved hints will appear here.</p>
               )}
             </div>
           </Panel>
