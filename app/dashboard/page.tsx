@@ -4,7 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { ElementType, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bell,
@@ -19,13 +19,11 @@ import {
   Trophy,
 } from 'lucide-react';
 import { useTeam } from '@/lib/team-context';
-import { getAllMissions, subscribeToAllTeams } from '@/lib/firebase-utils';
+import { getAllMissions, subscribeToAllTeams, subscribeToAppSettings } from '@/lib/firebase-utils';
 import type { Mission, Team } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-
-const GAME_DEADLINE = '2026-05-29T15:30:00-04:00';
 
 function formatRemaining(ms: number) {
   if (ms <= 0) return '00:00:00';
@@ -52,11 +50,14 @@ function isMissionLocked(mission: Mission | null) {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { session, team, alerts, isLoading: isSessionLoading, logout } = useTeam();
+  const { session, team, alerts, isLoading: isSessionLoading, logout, notificationsAllowed, enableNotifications } = useTeam();
   const [teams, setTeams] = useState<Team[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [timeRemaining, setTimeRemaining] = useState('00:00:00');
+  const [countdownTarget, setCountdownTarget] = useState(new Date('2026-05-29T15:30:00-04:00'));
+  const [countdownLabel, setCountdownLabel] = useState('Time Remaining');
   const [setupMessage, setSetupMessage] = useState('');
+  const notifiedUnlockedMissions = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     if (!isSessionLoading && !session) router.push('/');
@@ -72,13 +73,30 @@ export default function DashboardPage() {
       .catch(() => setSetupMessage('Mission Control could not load mission data from Firebase.'));
 
     const unsubscribe = subscribeToAllTeams((updatedTeams) => setTeams(updatedTeams));
-    return () => unsubscribe();
+    const unsubscribeSettings = subscribeToAppSettings((settings) => {
+      setCountdownTarget(settings.countdownTarget);
+      setCountdownLabel(settings.countdownLabel);
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeSettings();
+    };
   }, []);
 
   useEffect(() => {
-    const updateTimer = () => setTimeRemaining(formatRemaining(new Date(GAME_DEADLINE).getTime() - Date.now()));
+    const updateTimer = () => setTimeRemaining(formatRemaining(countdownTarget.getTime() - Date.now()));
     updateTimer();
     const interval = window.setInterval(updateTimer, 1000);
+    return () => window.clearInterval(interval);
+  }, [countdownTarget]);
+
+  useEffect(() => {
+    const processSchedule = () => {
+      fetch('/api/process-scheduled').catch(() => undefined);
+    };
+
+    processSchedule();
+    const interval = window.setInterval(processSchedule, 60000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -102,6 +120,19 @@ export default function DashboardPage() {
     .slice(0, 6);
 
   const visibleAlerts = alerts.slice(0, 6);
+
+  useEffect(() => {
+    if (!activeMission || locked || !notificationsAllowed || notifiedUnlockedMissions.current.has(activeMission.id)) return;
+
+    notifiedUnlockedMissions.current.add(activeMission.id);
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('New mission unlocked', {
+        body: `${activeMission.title} is now available.`,
+        tag: `mission-${activeMission.id}-unlocked`,
+        icon: '/apple-icon.png',
+      });
+    }
+  }, [activeMission, locked, notificationsAllowed]);
 
   if (isSessionLoading || !team) {
     return (
@@ -155,7 +186,7 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <StatusBox icon={Clock} label="Time Remaining" value={timeRemaining} />
+            <StatusBox icon={Clock} label={countdownLabel} value={timeRemaining} />
             <StatusBox icon={Gauge} label="Recovery Progress" value={`${redevelopmentPercent}%`} />
           </div>
         </div>
@@ -240,6 +271,17 @@ export default function DashboardPage() {
         <aside className="space-y-5">
           <Panel title="News Alerts" icon={Bell}>
             <div className="space-y-3">
+              <Button
+                variant="outline"
+                className="w-full border-[#b7c3cb]"
+                onClick={async () => {
+                  const result = await enableNotifications();
+                  if (!result.success) alert(result.error || 'Notifications could not be enabled.');
+                }}
+                disabled={notificationsAllowed}
+              >
+                {notificationsAllowed ? 'Notifications Enabled' : 'Enable Device Notifications'}
+              </Button>
               {visibleAlerts.length > 0 ? (
                 visibleAlerts.map((alert) => (
                   <div key={alert.id} className="rounded border border-[#d6e0e6] bg-[#f8fafb] p-3">
@@ -304,3 +346,4 @@ function Panel({ title, icon: Icon, children }: { title: string; icon: ElementTy
     </div>
   );
 }
+
