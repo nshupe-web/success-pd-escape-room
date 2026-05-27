@@ -42,6 +42,23 @@ export interface Alert {
   read: boolean;
 }
 
+export interface ScheduledAlert {
+  id: string;
+  teamId: string | null;
+  message: string;
+  type: Alert['type'];
+  sendAt: Date;
+  status: 'pending' | 'sent';
+  createdAt: Date;
+  sentAt?: Date | null;
+}
+
+export interface AppSettings {
+  countdownTarget: Date;
+  countdownLabel: string;
+  notificationsEnabled?: boolean;
+}
+
 export interface HintRequest {
   id: string;
   teamId: string;
