@@ -84,7 +84,7 @@ export default function MissionPage() {
     try {
       await updateTeamProgress(team.id, nextMission, completedMissions, score, missionCompletedAt, elapsedSeconds);
       setFeedback('correct');
-      toast.success('Mission complete. Student file fragment restored.');
+      toast.success('Mission complete. Student support plan submitted.');
       window.setTimeout(() => {
         if (mission.nextMissionId) router.push(`/mission/${mission.nextMissionId}`);
         else router.push('/dashboard');
@@ -130,7 +130,7 @@ export default function MissionPage() {
   }
 
   if (locked && !isCompleted) {
-    return <MissionShell title="Mission Locked" message="This node is not available yet. Return to Mission Control for the active objective." locked />;
+    return <MissionShell title="Mission Locked" message="This case file is not available yet. Return to Mission Control for the active objective." locked />;
   }
 
   return (
@@ -178,7 +178,7 @@ export default function MissionPage() {
               <h2 className="font-semibold text-[#26333d]">Mission Briefing</h2>
             </div>
             <div className="space-y-4 p-4">
-              <p className="text-sm leading-6 text-[#54616b]">{mission.storyContext || 'Recover the missing data fragment and submit the answer code.'}</p>
+              <p className="text-sm leading-6 text-[#54616b]">{mission.storyContext || 'Review the student scenario, complete the case task, and submit the answer code.'}</p>
               {mission.bonusPrompt && (
                 <div className="rounded border border-[#fad714] bg-yellow-50 p-3 text-sm text-[#5c4b00]">
                   <strong>Bonus Task:</strong> {mission.bonusPrompt}
